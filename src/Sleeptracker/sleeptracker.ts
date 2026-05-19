@@ -15,6 +15,7 @@ import { setupMassageButtons } from './processors/massageButtons';
 import { processMassageSensors } from './processors/massageSensors';
 import { setupPresetButtons } from './processors/presetButtons';
 import { processSafetyLightSwitches } from './processors/safetyLightSwitches';
+import { processSleepSummary } from './processors/sleepSummary';
 import { processSnoreReliefSwitches } from './processors/snoreReliefSwitches';
 import { getDevices } from './requests/getDevices';
 import { getHelloData } from './requests/getHelloData';
@@ -74,9 +75,9 @@ export const sleeptracker = async (mqtt: IMQTTConnection) => {
       const sideNameFunc = getSideNameFunc(sleepSensors, (s) => s.unitNumber);
       for (const sleepSensor of sleepSensors) {
         const { unitNumber: side } = sleepSensor;
-        bed.sensors[side] = sleepSensor;
-
         const sideName = sideNameFunc(sleepSensor);
+        bed.sensors[side] = { ...sleepSensor, sideName };
+
         const entityKey = `sleepSensor.${sideName}`;
         let sleepSensorInfo = bed.entities[entityKey] as SleepSensorInfoSensor;
         if (!sleepSensorInfo) {
@@ -89,7 +90,7 @@ export const sleeptracker = async (mqtt: IMQTTConnection) => {
             .setOnline();
         }
         if (sleepSensor.self) {
-          bed.sensors[side] = { ...sleepSensor, user };
+          bed.sensors[side] = { ...sleepSensor, sideName, user };
           sleepSensorInfo.setState(sleepSensor);
           const capability =
             capabilities.length === 1 ? capabilities[0] : capabilities.find((c) => c.side === sleepSensor.unitNumber);
@@ -131,6 +132,12 @@ export const sleeptracker = async (mqtt: IMQTTConnection) => {
         }
       }
       if (environmentSensors) await processEnvironmentSensors(mqtt, bed);
+
+      // Sleep summary — fetch per side whose owning user we have credentials for.
+      for (const sleepSensor of bed.sensors) {
+        if (!sleepSensor || !sleepSensor.self || !sleepSensor.sideName) continue;
+        await processSleepSummary(mqtt, bed, sleepSensor as any);
+      }
     }
   };
   await refreshDeviceData();

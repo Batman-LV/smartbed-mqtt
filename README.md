@@ -78,6 +78,17 @@ e.g.
 - Sensors for Massage strengths and patterns
 - Support for split beds, and multiple beds
 - Covers to control motors for raising, lowering, and stopping the head/feet/tilt/lumbar
+- **Nightly sleep summary sensors** (per side): total sleep duration (as `HH:MM:SS` and minutes), REM / Deep / Light / Awake stage durations in seconds, sleep score (0–100), sleep efficiency %, sleep latency, awakenings count, average heart rate, average respiration rate, plus a `Sleep Summary Raw` diagnostic sensor that publishes the raw cloud payload so any unparsed fields can be reached via template sensors.
+
+### Sleep summary endpoint discovery
+
+The Sleeptracker mobile app surfaces nightly sleep data, so the cloud endpoint exists, but Fullpower does not publish API docs. `src/Sleeptracker/requests/getSleepSummary.ts` probes a list of plausible paths (`CANDIDATE_PATHS`) on the existing processor base URL and caches the first 2xx response. Watch the add-on log on first run — when an endpoint succeeds you will see:
+
+```
+[Sleeptracker] sleep-summary endpoint confirmed: /<path>
+```
+
+If every candidate fails (the log ends with `No candidate sleep-summary endpoint returned data`), capture the official app's HTTPS traffic with HTTP Toolkit (Android) or Proxyman / mitmproxy (iOS), open the daily sleep view, find the POST whose body contains your `sleeptrackerProcessorID`, and add its path (and any extra payload fields) to `CANDIDATE_PATHS` and to the request `payload` object. The field-name extraction is also tolerant: `FIELD_CANDIDATES` lists synonyms tried for each metric, so a wire field called `remSeconds` or `rem` or `remSecs` will all map to the REM sensor automatically.
 
 ## Possible future features:
 
