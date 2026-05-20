@@ -49,4 +49,27 @@ export type SleepSummary = {
   // GMT seconds when this summary was uploaded by the bed; used to detect
   // stale data.
   lastUpdatedGMTSecs?: number;
+
+  // All nights returned by the API (newest first), used to backfill history.
+  history?: NightSummary[];
+};
+
+// A single night's scalar metrics, extracted for every record the API
+// returns. Used to backfill Home Assistant long-term statistics so the
+// dashboard charts can show history immediately rather than accumulating it
+// one night at a time.
+export type NightSummary = {
+  dayYYYYMMDD: string;
+  summaryTimeSecs?: number;
+  sleepScore?: number;
+  sleepMinutes?: number;
+  remSecs?: number;
+  deepSecs?: number;
+  lightSecs?: number;
+  awakeSecs?: number;
+  sleepEfficiencyPercent?: number;
+  sleepLatencySecs?: number;
+  awakeningsCount?: number;
+  avgHeartRateBpm?: number;
+  avgRespirationRateBpm?: number;
 };

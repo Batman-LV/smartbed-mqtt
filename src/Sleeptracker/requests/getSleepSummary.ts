@@ -214,6 +214,36 @@ const daysAgoYYYYMMDD = (days: number): string => {
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
 };
 
+const pickString = (record: Record<string, unknown>, keys: string[]): string | undefined => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value !== '') return value;
+  }
+  return undefined;
+};
+
+// Extracts one night's scalar metrics from a daily-summary record.
+const extractNight = (record: Record<string, unknown>): import('../types/SleepSummary').NightSummary => {
+  const totalSleepSecs = deepPick(record, FIELD_CANDIDATES.totalSleepSecs);
+  return {
+    dayYYYYMMDD: pickString(record, ['dayYYYYMMDD', 'startDayYYYYMMDD', 'endDayYYYYMMDD']) ?? '',
+    summaryTimeSecs:
+      deepPick(record, FIELD_CANDIDATES.lastUpdatedGMTSecs) ??
+      deepPick(record, FIELD_CANDIDATES.bedtimeGMTSecs),
+    sleepScore: deepPick(record, FIELD_CANDIDATES.sleepScore),
+    sleepMinutes: typeof totalSleepSecs === 'number' ? Math.round(totalSleepSecs / 60) : undefined,
+    remSecs: deepPick(record, FIELD_CANDIDATES.remSecs),
+    deepSecs: deepPick(record, FIELD_CANDIDATES.deepSecs),
+    lightSecs: deepPick(record, FIELD_CANDIDATES.lightSecs),
+    awakeSecs: deepPick(record, FIELD_CANDIDATES.awakeSecs),
+    sleepEfficiencyPercent: deepPick(record, FIELD_CANDIDATES.sleepEfficiencyPercent),
+    sleepLatencySecs: deepPick(record, FIELD_CANDIDATES.sleepLatencySecs),
+    awakeningsCount: deepPick(record, FIELD_CANDIDATES.awakeningsCount),
+    avgHeartRateBpm: deepPick(record, FIELD_CANDIDATES.avgHeartRateBpm),
+    avgRespirationRateBpm: deepPick(record, FIELD_CANDIDATES.avgRespirationRateBpm),
+  };
+};
+
 const normalize = (
   data: Record<string, unknown>,
   unitNumber: 0 | 1,
@@ -256,6 +286,11 @@ const normalize = (
     // diagnostic sensor so the user can write template sensors for any
     // unparsed fields.
     raw: latest as Record<string, unknown>,
+    // Every night the API returned, extracted to scalar metrics, for the
+    // history backfill. Filtered to records that have a valid day string.
+    history: (Array.isArray(dailies) ? dailies : [])
+      .map((record: Record<string, unknown>) => extractNight(record))
+      .filter((night: import('../types/SleepSummary').NightSummary) => night.dayYYYYMMDD !== ''),
   };
 };
 
@@ -281,7 +316,7 @@ export const getSleepSummary = async (
   };
 
   const today = todayYYYYMMDD();
-  const startOfRange = daysAgoYYYYMMDD(60);
+  const startOfRange = daysAgoYYYYMMDD(120);
 
   // Mirrors the request body captured from the iOS app, with a 60-day window
   // and no modAfterGmtSecs so we always get the most recent record back.
@@ -299,7 +334,7 @@ export const getSleepSummary = async (
     includeSleepFailures: false,
     currentRecordingStatus: true,
     newestToOldest: true,
-    resultLimitSize: 20,
+    resultLimitSize: 200,
     sleepsDailyStartDayYYYYMMDD: startOfRange,
     sleepsDailyEndDayYYYYMMDD: today,
     sleepsWeeklyStartDayYYYYMMDD: startOfRange,

@@ -15,6 +15,7 @@ import {
   SleepLatencySensor,
   SleepScoreSensor,
 } from '../entities/SleepStages/ScalarSensors';
+import { SleepHistorySensor } from '../entities/SleepStages/SleepHistorySensor';
 import { SleepSummaryDiagnosticSensor } from '../entities/SleepStages/SleepSummaryDiagnosticSensor';
 import { TotalSleepMinutesSensor } from '../entities/SleepStages/TotalSleepMinutesSensor';
 import { TotalSleepTimeSensor } from '../entities/SleepStages/TotalSleepTimeSensor';
@@ -36,6 +37,7 @@ const sensorClasses = [
   { key: 'sleepHeartRate', label: 'Average Heart Rate', Cls: HeartRateAvgSensor },
   { key: 'sleepRespirationRate', label: 'Average Respiration Rate', Cls: RespirationRateAvgSensor },
   { key: 'sleepSummaryRaw', label: 'Sleep Summary Raw', Cls: SleepSummaryDiagnosticSensor },
+  { key: 'sleepHistory', label: 'Sleep History', Cls: SleepHistorySensor },
 ] as const;
 
 export const processSleepSummary = async (
