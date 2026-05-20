@@ -96,4 +96,18 @@ describe(cleanJsonState.name, () => {
     const actual = cleanJsonState(expected);
     expect(actual).toEqual(expected);
   });
+
+  it('should not throw when a GMTSecs field is undefined', () => {
+    const state = { bedtimeGMTSecs: undefined, score: 88 };
+    expect(() => cleanJsonState(state)).not.toThrow();
+    const actual = cleanJsonState(state);
+    expect(actual).toEqual({ bedtime: undefined, score: 88 });
+  });
+
+  it('should pass through a GMTSecs field that is not a valid number', () => {
+    const state = { wakeTimeGMTSecs: 'not-a-number' };
+    expect(() => cleanJsonState(state)).not.toThrow();
+    const actual = cleanJsonState(state);
+    expect(actual).toEqual({ wakeTime: 'not-a-number' });
+  });
 });

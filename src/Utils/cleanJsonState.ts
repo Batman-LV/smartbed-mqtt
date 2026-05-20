@@ -14,7 +14,13 @@ export const cleanJsonState = (
   }, {} as Dictionary<any>);
 };
 
-const isoDateString = (value: number) => new Date(value * 1000).toISOString();
+const isoDateString = (value: number) => {
+  // Guard against missing or non-numeric values: `new Date(NaN).toISOString()`
+  // throws `RangeError: Invalid time value` and would crash the add-on. If the
+  // value can't be turned into a valid date, pass it through unchanged.
+  const date = new Date(value * 1000);
+  return Number.isNaN(date.getTime()) ? value : date.toISOString();
+};
 
 const handleEntry = (
   acc: Dictionary<any>,
@@ -39,10 +45,18 @@ const handleEntry = (
     value = isoDateString(value);
   } else if (key === 'localTimeNow' && state) {
     const offset = state['gmtOffset'] / 36;
-    value = isoDateString(value).replace(
-      'Z',
-      offset.toLocaleString('en-US', { style: 'decimal', minimumIntegerDigits: 4, useGrouping: false })
-    );
+    const iso = isoDateString(value);
+    value =
+      typeof iso === 'string'
+        ? iso.replace(
+            'Z',
+            offset.toLocaleString('en-US', {
+              style: 'decimal',
+              minimumIntegerDigits: 4,
+              useGrouping: false,
+            })
+          )
+        : iso;
   } else if (key === 'cableTime') {
     value = isoDateString(value);
   } else if (typeof value === 'object') {
