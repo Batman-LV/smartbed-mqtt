@@ -22,10 +22,12 @@ import { urls } from './shared/urls';
 // bed types do not break the integration. Any field we miss is preserved on
 // the diagnostic raw sensor so the user can author template sensors for it.
 
-// Field-name candidates per metric — first match wins. Add more as the actual
-// response shape is observed via the diagnostic raw sensor.
+// Field-name candidates per metric — first match wins. The leading entries
+// are the exact field names confirmed from a live Sleeptracker daily summary
+// record; the rest are fallbacks kept for resilience across API versions.
 const FIELD_CANDIDATES = {
   totalSleepSecs: [
+    'sleepTotalSecs',
     'totalSleepSecs',
     'totalSleepSeconds',
     'totalSleep',
@@ -36,6 +38,7 @@ const FIELD_CANDIDATES = {
     'asleepSecs',
   ],
   totalTimeInBedSecs: [
+    'inBedTotalSecs',
     'totalTimeInBedSecs',
     'timeInBedSecs',
     'inBedSecs',
@@ -44,6 +47,7 @@ const FIELD_CANDIDATES = {
     'inBedDurationSecs',
   ],
   sleepEfficiencyPercent: [
+    'sleepEfficiencyPercentage',
     'sleepEfficiency',
     'sleepEfficiencyPercent',
     'efficiency',
@@ -60,6 +64,8 @@ const FIELD_CANDIDATES = {
     'overallScore',
   ],
   sleepLatencySecs: [
+    'timeToSleepTotalSecs',
+    'timeToSleepAvgSecs',
     'sleepLatencySecs',
     'sleepLatency',
     'timeToSleepSecs',
@@ -68,6 +74,7 @@ const FIELD_CANDIDATES = {
     'sleepOnsetLatencySecs',
   ],
   awakeningsCount: [
+    'awakeCount',
     'awakenings',
     'awakeningsCount',
     'numAwakenings',
@@ -75,8 +82,17 @@ const FIELD_CANDIDATES = {
     'numberOfAwakenings',
     'wakeUpCount',
   ],
-  remSecs: ['remSecs', 'remSleepSecs', 'remSeconds', 'rem', 'remSleepSeconds', 'remDurationSecs'],
+  remSecs: [
+    'remTotalSecs',
+    'remSecs',
+    'remSleepSecs',
+    'remSeconds',
+    'rem',
+    'remSleepSeconds',
+    'remDurationSecs',
+  ],
   deepSecs: [
+    'deepTotalSecs',
     'deepSecs',
     'deepSleepSecs',
     'deepSeconds',
@@ -85,6 +101,7 @@ const FIELD_CANDIDATES = {
     'deepDurationSecs',
   ],
   lightSecs: [
+    'lightTotalSecs',
     'lightSecs',
     'lightSleepSecs',
     'lightSeconds',
@@ -93,6 +110,7 @@ const FIELD_CANDIDATES = {
     'lightDurationSecs',
   ],
   awakeSecs: [
+    'awakeTotalSecs',
     'awakeSecs',
     'awakeSeconds',
     'awakeTimeSecs',
@@ -103,6 +121,8 @@ const FIELD_CANDIDATES = {
     'wasoSecs',
   ],
   bedtimeGMTSecs: [
+    'firstAsleepTimeSecs',
+    'firstOnBedTimeSecs',
     'bedtimeGMTSecs',
     'bedTimeGMTSecs',
     'bedtimeGmtSecs',
@@ -112,6 +132,8 @@ const FIELD_CANDIDATES = {
     'fellAsleepGmtSecs',
   ],
   wakeTimeGMTSecs: [
+    'lastAwakeTimeSecs',
+    'lastOffBedTimeSecs',
     'wakeTimeGMTSecs',
     'wakeUpGMTSecs',
     'wakeGmtSecs',
@@ -120,6 +142,7 @@ const FIELD_CANDIDATES = {
     'wakeUpGmtSecs',
   ],
   avgHeartRateBpm: [
+    'hrAvg',
     'avgHeartRate',
     'averageHeartRate',
     'heartRateAvg',
@@ -128,6 +151,7 @@ const FIELD_CANDIDATES = {
     'averageHR',
   ],
   avgRespirationRateBpm: [
+    'rrAvg',
     'avgRespirationRate',
     'averageRespirationRate',
     'respirationRateAvg',
@@ -137,6 +161,7 @@ const FIELD_CANDIDATES = {
     'avgBreathsPerMin',
   ],
   lastUpdatedGMTSecs: [
+    'summaryTimeSecs',
     'lastUpdatedGMTSecs',
     'uploadedGMTSecs',
     'recordedGMTSecs',
