@@ -80,15 +80,22 @@ e.g.
 - Covers to control motors for raising, lowering, and stopping the head/feet/tilt/lumbar
 - **Nightly sleep summary sensors** (per side): total sleep duration (as `HH:MM:SS` and minutes), REM / Deep / Light / Awake stage durations in seconds, sleep score (0–100), sleep efficiency %, sleep latency, awakenings count, average heart rate, average respiration rate, plus a `Sleep Summary Raw` diagnostic sensor that publishes the raw cloud payload so any unparsed fields can be reached via template sensors.
 
-### Sleep summary endpoint discovery
+### Sleep summary endpoint
 
-The Sleeptracker mobile app surfaces nightly sleep data, so the cloud endpoint exists, but Fullpower does not publish API docs. `src/Sleeptracker/requests/getSleepSummary.ts` probes a list of plausible paths (`CANDIDATE_PATHS`) on the existing processor base URL and caches the first 2xx response. Watch the add-on log on first run — when an endpoint succeeds you will see:
+Sleep stage and summary data is fetched from a different sub-API than the rest of the Sleeptracker integration: instead of the `/fpcsiot/processor/...` family of endpoints, it lives on a webui-style fetch endpoint discovered by capturing the official mobile app's HTTPS traffic:
 
 ```
-[Sleeptracker] sleep-summary endpoint confirmed: /<path>
+POST https://app.tsi.sleeptracker.com/actrack-client/v2/actrack/webui
+
+Body: {
+  command: "fetch",
+  dataClass: "activities",
+  includeSleepsDailySummary: true,
+  ...date range params...
+}
 ```
 
-If every candidate fails (the log ends with `No candidate sleep-summary endpoint returned data`), capture the official app's HTTPS traffic with HTTP Toolkit (Android) or Proxyman / mitmproxy (iOS), open the daily sleep view, find the POST whose body contains your `sleeptrackerProcessorID`, and add its path (and any extra payload fields) to `CANDIDATE_PATHS` and to the request `payload` object. The field-name extraction is also tolerant: `FIELD_CANDIDATES` lists synonyms tried for each metric, so a wire field called `remSeconds` or `rem` or `remSecs` will all map to the REM sensor automatically.
+The response wraps the data in `summary.sleepsDailySummary.sleepSummaryDailyDetails[]`. The integration takes the most recent entry. Field extraction in `src/Sleeptracker/requests/getSleepSummary.ts` uses a list of synonyms per metric (e.g. `remSecs` / `remSleepSecs` / `remSleepSeconds` / `rem`) and a recursive search, so naming variations across API versions or bed types do not break the integration. Any field not parsed into a typed sensor is still published verbatim on the `Sleep Summary Raw` diagnostic sensor — write a template sensor in HA to expose it.
 
 ## Possible future features:
 

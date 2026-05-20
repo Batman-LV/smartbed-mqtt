@@ -41,13 +41,14 @@ const sensorClasses = [
 export const processSleepSummary = async (
   mqtt: IMQTTConnection,
   bed: Bed,
-  sleepSensor: SleepSensor & { sideName: string }
+  sleepSensor: SleepSensor & { sideName: string; user?: Bed['primaryUser'] }
 ) => {
+  const credentials = sleepSensor.user ?? bed.primaryUser;
   const summary = await getSleepSummary(
     bed.processorId,
     sleepSensor.unitNumber,
     sleepSensor.sensorID,
-    bed.primaryUser
+    credentials
   );
   if (!summary) {
     logInfo(`[Sleeptracker] No sleep summary returned for unit ${sleepSensor.unitNumber}`);

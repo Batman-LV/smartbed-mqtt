@@ -1,70 +1,162 @@
 import { logError, logInfo } from '@utils/logger';
-import axios, { AxiosResponse } from 'axios';
+import axios from 'axios';
 import { Credentials } from '../options';
 import { SleepSummary } from '../types/SleepSummary';
 import { getAuthHeader } from './getAuthHeader';
 import defaultHeaders from './shared/defaultHeaders';
-import { buildDefaultPayload } from './shared/defaultPayload';
 import { urls } from './shared/urls';
 
-// The Sleeptracker mobile app shows REM/Deep/Light/Awake + total sleep + HR +
-// respiration + sleep score, so the data is reachable somewhere on the
-// app.tsi.sleeptracker.com cloud. The exact endpoint name and response shape
-// are not documented publicly. This module tries a sequence of plausible
-// endpoints and stops at the first 2xx response with a parseable body, logging
-// each attempt so the working one becomes obvious in the supervisor logs.
+// The Sleeptracker mobile app fetches sleep summary data via a webui-style
+// endpoint on a different sub-API than the processor calls used elsewhere in
+// this module. Endpoint discovered by capturing the iOS app's HTTPS traffic
+// via Fiddler:
 //
-// If none of the candidates here works, capture HTTPS traffic from the official
-// Sleeptracker app (HTTP Toolkit on Android, Proxyman/mitmproxy on iOS) while
-// you scroll the daily sleep view, find the request whose body contains a
-// `sleeptrackerProcessorID` and a date range, and add its path + payload to
-// the CANDIDATE_PATHS / extra payload below.
-const CANDIDATE_PATHS = [
-  '/latestSleepSummary',
-  '/getLatestSleepSummary',
-  '/sleepSummary',
-  '/getSleepSummary',
-  '/getDailySleep',
-  '/getSleepHistory',
-  '/getSleepActivity',
-  '/latestActivityData',
-  '/getSleepData',
-  '/getSleepSession',
-];
+//   POST https://app.tsi.sleeptracker.com/actrack-client/v2/actrack/webui
+//
+//   Body: { command: "fetch", dataClass: "activities", ... }
+//
+// The response wraps everything in `summary` and `clientSlotList`. The most
+// recent night's metrics live at
+// `summary.sleepsDailySummary.sleepSummaryDailyDetails[0]`. We use a
+// deep-search field extractor so naming variations between API versions and
+// bed types do not break the integration. Any field we miss is preserved on
+// the diagnostic raw sensor so the user can author template sensors for it.
 
-// Field-name candidates per metric — first match wins. Add more as you
-// discover them in the raw payload published to the diagnostic sensor.
+// Field-name candidates per metric — first match wins. Add more as the actual
+// response shape is observed via the diagnostic raw sensor.
 const FIELD_CANDIDATES = {
-  totalSleepSecs: ['totalSleepSecs', 'totalSleepSeconds', 'totalSleep', 'sleepSecs', 'sleepDurationSecs'],
-  totalTimeInBedSecs: ['totalTimeInBedSecs', 'timeInBedSecs', 'inBedSecs', 'totalTimeInBed'],
-  sleepEfficiencyPercent: ['sleepEfficiency', 'sleepEfficiencyPercent', 'efficiency', 'efficiencyPercent'],
-  sleepScore: ['sleepScore', 'score', 'qualityScore', 'sleepQuality'],
-  sleepLatencySecs: ['sleepLatencySecs', 'sleepLatency', 'timeToSleepSecs', 'timeToFallAsleepSecs'],
-  awakeningsCount: ['awakenings', 'awakeningsCount', 'numAwakenings', 'wakeCount'],
-  remSecs: ['remSecs', 'remSleepSecs', 'remSeconds', 'rem'],
-  deepSecs: ['deepSecs', 'deepSleepSecs', 'deepSeconds', 'deep'],
-  lightSecs: ['lightSecs', 'lightSleepSecs', 'lightSeconds', 'light'],
-  awakeSecs: ['awakeSecs', 'awakeSeconds', 'awakeTimeSecs', 'awake', 'wakeSecs'],
-  bedtimeGMTSecs: ['bedtimeGMTSecs', 'bedTimeGMTSecs', 'bedtimeGmtSecs', 'fellAsleepGMTSecs', 'sleepOnsetGMTSecs'],
-  wakeTimeGMTSecs: ['wakeTimeGMTSecs', 'wakeUpGMTSecs', 'wakeGmtSecs', 'wakeupGMTSecs'],
-  avgHeartRateBpm: ['avgHeartRate', 'averageHeartRate', 'heartRateAvg', 'avgHeartRateBpm', 'avgHR'],
-  avgRespirationRateBpm: ['avgRespirationRate', 'averageRespirationRate', 'respirationRateAvg', 'avgBR', 'avgBreathRate'],
-  lastUpdatedGMTSecs: ['lastUpdatedGMTSecs', 'uploadedGMTSecs', 'recordedGMTSecs', 'createdGMTSecs'],
+  totalSleepSecs: [
+    'totalSleepSecs',
+    'totalSleepSeconds',
+    'totalSleep',
+    'sleepSecs',
+    'sleepDurationSecs',
+    'totalSleepDurationSecs',
+    'sleepDurationSeconds',
+    'asleepSecs',
+  ],
+  totalTimeInBedSecs: [
+    'totalTimeInBedSecs',
+    'timeInBedSecs',
+    'inBedSecs',
+    'totalTimeInBed',
+    'totalInBedSecs',
+    'inBedDurationSecs',
+  ],
+  sleepEfficiencyPercent: [
+    'sleepEfficiency',
+    'sleepEfficiencyPercent',
+    'efficiency',
+    'efficiencyPercent',
+    'sleepEfficiencyPct',
+  ],
+  sleepScore: [
+    'sleepScore',
+    'score',
+    'qualityScore',
+    'sleepQuality',
+    'sleepQualityScore',
+    'sleepScoreValue',
+    'overallScore',
+  ],
+  sleepLatencySecs: [
+    'sleepLatencySecs',
+    'sleepLatency',
+    'timeToSleepSecs',
+    'timeToFallAsleepSecs',
+    'latencySecs',
+    'sleepOnsetLatencySecs',
+  ],
+  awakeningsCount: [
+    'awakenings',
+    'awakeningsCount',
+    'numAwakenings',
+    'wakeCount',
+    'numberOfAwakenings',
+    'wakeUpCount',
+  ],
+  remSecs: ['remSecs', 'remSleepSecs', 'remSeconds', 'rem', 'remSleepSeconds', 'remDurationSecs'],
+  deepSecs: [
+    'deepSecs',
+    'deepSleepSecs',
+    'deepSeconds',
+    'deep',
+    'deepSleepSeconds',
+    'deepDurationSecs',
+  ],
+  lightSecs: [
+    'lightSecs',
+    'lightSleepSecs',
+    'lightSeconds',
+    'light',
+    'lightSleepSeconds',
+    'lightDurationSecs',
+  ],
+  awakeSecs: [
+    'awakeSecs',
+    'awakeSeconds',
+    'awakeTimeSecs',
+    'awake',
+    'wakeSecs',
+    'awakeDurationSecs',
+    'wakeAfterSleepOnsetSecs',
+    'wasoSecs',
+  ],
+  bedtimeGMTSecs: [
+    'bedtimeGMTSecs',
+    'bedTimeGMTSecs',
+    'bedtimeGmtSecs',
+    'fellAsleepGMTSecs',
+    'sleepOnsetGMTSecs',
+    'startTimeGmtSecs',
+    'fellAsleepGmtSecs',
+  ],
+  wakeTimeGMTSecs: [
+    'wakeTimeGMTSecs',
+    'wakeUpGMTSecs',
+    'wakeGmtSecs',
+    'wakeupGMTSecs',
+    'endTimeGmtSecs',
+    'wakeUpGmtSecs',
+  ],
+  avgHeartRateBpm: [
+    'avgHeartRate',
+    'averageHeartRate',
+    'heartRateAvg',
+    'avgHeartRateBpm',
+    'avgHR',
+    'averageHR',
+  ],
+  avgRespirationRateBpm: [
+    'avgRespirationRate',
+    'averageRespirationRate',
+    'respirationRateAvg',
+    'avgBR',
+    'avgBreathRate',
+    'averageBreathRate',
+    'avgBreathsPerMin',
+  ],
+  lastUpdatedGMTSecs: [
+    'lastUpdatedGMTSecs',
+    'uploadedGMTSecs',
+    'recordedGMTSecs',
+    'createdGMTSecs',
+    'modifiedGmtSecs',
+    'lastModGmtSecs',
+  ],
 };
 
 const pick = (obj: Record<string, unknown>, keys: string[]): number | undefined => {
   for (const key of keys) {
     const value = obj[key];
     if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string' && value !== '' && !Number.isNaN(Number(value))) return Number(value);
+    if (typeof value === 'string' && value !== '' && !Number.isNaN(Number(value))) {
+      return Number(value);
+    }
   }
   return undefined;
 };
 
-// Recursively search for a key in a nested object, returning the first match.
-// Sleeptracker payloads sometimes wrap the data in `dataList`, `sessions`,
-// `summary`, etc. — this keeps us tolerant to shape variation without having
-// to know it in advance.
 const deepPick = (obj: unknown, keys: string[]): number | undefined => {
   if (!obj || typeof obj !== 'object') return undefined;
   if (Array.isArray(obj)) {
@@ -86,36 +178,64 @@ const deepPick = (obj: unknown, keys: string[]): number | undefined => {
   return undefined;
 };
 
-const normalize = (
-  raw: Record<string, unknown>,
-  unitNumber: 0 | 1,
-  sensorID?: number
-): SleepSummary => ({
-  unitNumber,
-  sensorID,
-  totalSleepSecs: deepPick(raw, FIELD_CANDIDATES.totalSleepSecs),
-  totalTimeInBedSecs: deepPick(raw, FIELD_CANDIDATES.totalTimeInBedSecs),
-  sleepEfficiencyPercent: deepPick(raw, FIELD_CANDIDATES.sleepEfficiencyPercent),
-  sleepScore: deepPick(raw, FIELD_CANDIDATES.sleepScore),
-  sleepLatencySecs: deepPick(raw, FIELD_CANDIDATES.sleepLatencySecs),
-  awakeningsCount: deepPick(raw, FIELD_CANDIDATES.awakeningsCount),
-  remSecs: deepPick(raw, FIELD_CANDIDATES.remSecs),
-  deepSecs: deepPick(raw, FIELD_CANDIDATES.deepSecs),
-  lightSecs: deepPick(raw, FIELD_CANDIDATES.lightSecs),
-  awakeSecs: deepPick(raw, FIELD_CANDIDATES.awakeSecs),
-  bedtimeGMTSecs: deepPick(raw, FIELD_CANDIDATES.bedtimeGMTSecs),
-  wakeTimeGMTSecs: deepPick(raw, FIELD_CANDIDATES.wakeTimeGMTSecs),
-  avgHeartRateBpm: deepPick(raw, FIELD_CANDIDATES.avgHeartRateBpm),
-  avgRespirationRateBpm: deepPick(raw, FIELD_CANDIDATES.avgRespirationRateBpm),
-  lastUpdatedGMTSecs: deepPick(raw, FIELD_CANDIDATES.lastUpdatedGMTSecs),
-  raw,
-});
+const todayYYYYMMDD = (): string => {
+  const d = new Date();
+  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+};
 
-// Cache the working endpoint between calls so we don't probe every refresh.
-let workingPath: string | null = null;
+const daysAgoYYYYMMDD = (days: number): string => {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+};
+
+const normalize = (
+  data: Record<string, unknown>,
+  unitNumber: 0 | 1,
+  sensorID: number | undefined
+): SleepSummary => {
+  // Most recent daily record holds the metrics we care about. Fall back to
+  // searching the entire response if the expected path is empty.
+  const summary = (data as any)?.summary;
+  const dailies =
+    summary?.sleepsDailySummary?.sleepSummaryDailyDetails ||
+    summary?.dailies ||
+    [];
+  const latest = Array.isArray(dailies) && dailies.length > 0 ? dailies[0] : data;
+
+  const lastUpdated =
+    deepPick(latest, FIELD_CANDIDATES.lastUpdatedGMTSecs) ??
+    (typeof (data as any)?.currentServerTimeGmtMs === 'number'
+      ? Math.floor((data as any).currentServerTimeGmtMs / 1000)
+      : undefined);
+
+  return {
+    unitNumber,
+    sensorID,
+    totalSleepSecs: deepPick(latest, FIELD_CANDIDATES.totalSleepSecs),
+    totalTimeInBedSecs: deepPick(latest, FIELD_CANDIDATES.totalTimeInBedSecs),
+    sleepEfficiencyPercent: deepPick(latest, FIELD_CANDIDATES.sleepEfficiencyPercent),
+    sleepScore: deepPick(latest, FIELD_CANDIDATES.sleepScore),
+    sleepLatencySecs: deepPick(latest, FIELD_CANDIDATES.sleepLatencySecs),
+    awakeningsCount: deepPick(latest, FIELD_CANDIDATES.awakeningsCount),
+    remSecs: deepPick(latest, FIELD_CANDIDATES.remSecs),
+    deepSecs: deepPick(latest, FIELD_CANDIDATES.deepSecs),
+    lightSecs: deepPick(latest, FIELD_CANDIDATES.lightSecs),
+    awakeSecs: deepPick(latest, FIELD_CANDIDATES.awakeSecs),
+    bedtimeGMTSecs: deepPick(latest, FIELD_CANDIDATES.bedtimeGMTSecs),
+    wakeTimeGMTSecs: deepPick(latest, FIELD_CANDIDATES.wakeTimeGMTSecs),
+    avgHeartRateBpm: deepPick(latest, FIELD_CANDIDATES.avgHeartRateBpm),
+    avgRespirationRateBpm: deepPick(latest, FIELD_CANDIDATES.avgRespirationRateBpm),
+    lastUpdatedGMTSecs: lastUpdated,
+    // Expose the latest daily record (not the entire wrapping envelope) on the
+    // diagnostic sensor so the user can write template sensors for any
+    // unparsed fields.
+    raw: latest as Record<string, unknown>,
+  };
+};
 
 export const getSleepSummary = async (
-  processorId: number,
+  _processorId: number,
   unitNumber: 0 | 1,
   sensorID: number | undefined,
   credentials: Credentials
@@ -123,50 +243,80 @@ export const getSleepSummary = async (
   const authHeader = await getAuthHeader(credentials);
   if (!authHeader) return null;
 
-  const { appHost, processorBaseUrl } = urls(credentials);
-  const headers = { ...defaultHeaders, Host: appHost, Authorization: authHeader };
-  const payload = {
-    ...buildDefaultPayload('sleepSummary', credentials),
-    sleeptrackerProcessorID: processorId,
-    unitNumber,
-    ...(sensorID !== undefined ? { sensorID } : {}),
+  const { appHost, fpcsiotBaseUrl } = urls(credentials);
+  // The webui endpoint lives under /actrack, not /fpcsiot/processor. Build it
+  // by replacing the fpcsiot segment of the shared base URL.
+  const actrackBaseUrl = fpcsiotBaseUrl.replace('/fpcsiot', '/actrack');
+  const url = `${actrackBaseUrl}/webui`;
+
+  const headers = {
+    ...defaultHeaders,
+    Host: appHost,
+    Authorization: authHeader,
   };
 
-  const paths = workingPath ? [workingPath, ...CANDIDATE_PATHS.filter((p) => p !== workingPath)] : CANDIDATE_PATHS;
+  const today = todayYYYYMMDD();
+  const startOfRange = daysAgoYYYYMMDD(60);
 
-  for (const path of paths) {
-    const url = `${processorBaseUrl}${path}`;
-    let response: AxiosResponse | undefined;
-    try {
-      response = await axios.request({
-        method: 'POST',
-        url,
-        headers,
-        data: payload,
-        validateStatus: () => true,
-      });
-    } catch (err) {
-      logError(`[Sleeptracker] sleep-summary probe error on ${path}`, err);
-      continue;
+  // Mirrors the request body captured from the iOS app, with a 60-day window
+  // and no modAfterGmtSecs so we always get the most recent record back.
+  const body = {
+    command: 'fetch',
+    dataClass: 'activities',
+    clientID: 'sleeptracker-ios-tsi',
+    clientVersion: 'H-3.2.0.421',
+    id: `smartbed-mqtt:${Date.now()}`,
+    includeSleepsDailySummary: true,
+    includeSleepsDailySummaryDeletedAndPendingRecordings: true,
+    includeSleepsWeeklySummary: true,
+    includeSleepsMonthlySummary: true,
+    sleepZSleepsSummaries: true,
+    includeSleepFailures: false,
+    currentRecordingStatus: true,
+    newestToOldest: true,
+    resultLimitSize: 20,
+    sleepsDailyStartDayYYYYMMDD: startOfRange,
+    sleepsDailyEndDayYYYYMMDD: today,
+    sleepsWeeklyStartDayYYYYMMDD: startOfRange,
+    sleepsWeeklyEndDayYYYYMMDD: today,
+    sleepsMonthlyStartDayYYYYMMDD: startOfRange,
+    sleepsMonthlyEndDayYYYYMMDD: today,
+    sleepFailuresStartDayYYYYMMDD: startOfRange,
+    sleepFailuresEndDayYYYYMMDD: today,
+  };
+
+  try {
+    const response = await axios.request({
+      method: 'POST',
+      url,
+      headers,
+      data: body,
+      validateStatus: () => true,
+    });
+
+    if (response.status !== 200) {
+      logError(
+        `[Sleeptracker] sleep-summary HTTP ${response.status} on ${url}`,
+        response.data
+      );
+      return null;
     }
 
-    if (!response) continue;
-    if (response.status < 200 || response.status >= 300) {
-      logInfo(`[Sleeptracker] sleep-summary probe ${path} -> HTTP ${response.status}`);
-      continue;
+    const data = response.data;
+    if (!data || typeof data !== 'object') {
+      logInfo('[Sleeptracker] sleep-summary empty or non-JSON response');
+      return null;
     }
 
-    const body = response.data;
-    if (!body || typeof body !== 'object') {
-      logInfo(`[Sleeptracker] sleep-summary probe ${path} -> empty or non-JSON body`);
-      continue;
-    }
+    const dailiesLen =
+      (data as any)?.summary?.sleepsDailySummary?.sleepSummaryDailyDetails?.length ?? 0;
+    logInfo(
+      `[Sleeptracker] sleep-summary fetched OK; daily records returned: ${dailiesLen}`
+    );
 
-    workingPath = path;
-    logInfo(`[Sleeptracker] sleep-summary endpoint confirmed: ${path}`);
-    return normalize(body as Record<string, unknown>, unitNumber, sensorID);
+    return normalize(data as Record<string, unknown>, unitNumber, sensorID);
+  } catch (err) {
+    logError('[Sleeptracker] sleep-summary request error', err);
+    return null;
   }
-
-  logError('[Sleeptracker] No candidate sleep-summary endpoint returned data. Capture the official app traffic and add the real path to CANDIDATE_PATHS in src/Sleeptracker/requests/getSleepSummary.ts.');
-  return null;
 };
