@@ -20,6 +20,7 @@ import { SleepSummaryDiagnosticSensor } from '../entities/SleepStages/SleepSumma
 import { TotalSleepMinutesSensor } from '../entities/SleepStages/TotalSleepMinutesSensor';
 import { TotalSleepTimeSensor } from '../entities/SleepStages/TotalSleepTimeSensor';
 import { getSleepSummary } from '../requests/getSleepSummary';
+import { importSleepStatistics } from '../statistics/importStatistics';
 import { Bed } from '../types/Bed';
 import { SleepSensor } from '../types/SleepSensor';
 
@@ -67,4 +68,8 @@ export const processSleepSummary = async (
     }
     entity.setState(summary);
   }
+
+  // Backfill / refresh Home Assistant long-term statistics from the full
+  // nightly history. Fire-and-forget — self-throttled and never throws.
+  void importSleepStatistics(summary.history, sleepSensor.sideName);
 };
